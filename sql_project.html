@@ -1,0 +1,892 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>QueryBench — Daily SQL Practice</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/sql.js@1.10.3/dist/sql-wasm.js"></script>
+<style>
+  :root{
+    --bg:#0F141B; --surface:#161D26; --surface-alt:#1E2733;
+    --border:#2A3542; --border-soft:#212B36;
+    --amber:#F2B84B; --amber-dim:#8A6A2E;
+    --teal:#5FCBBB; --purple:#B48CE0; --danger:#F2685C;
+    --text:#E7ECF2; --text-muted:#8B97A6; --text-faint:#5C6773;
+    --mono:'IBM Plex Mono',monospace; --display:'Space Grotesk',sans-serif; --body:'Inter',sans-serif;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;background:var(--bg);color:var(--text);font-family:var(--body);height:100%;}
+  body{display:flex;flex-direction:column;min-height:100vh;}
+  ::selection{background:var(--amber);color:#1a1206;}
+
+  /* Loading overlay */
+  #loading-overlay{
+    position:fixed;inset:0;background:var(--bg);z-index:999;
+    display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;
+  }
+  #loading-overlay .spin{
+    width:28px;height:28px;border:3px solid var(--border);border-top-color:var(--amber);
+    border-radius:50%;animation:spin .8s linear infinite;
+  }
+  #loading-overlay p{font-family:var(--mono);color:var(--text-muted);font-size:13px;}
+  @keyframes spin{to{transform:rotate(360deg);}}
+
+  .topbar{
+    display:flex;align-items:center;justify-content:space-between;
+    padding:14px 24px;border-bottom:1px solid var(--border-soft);
+    background:linear-gradient(180deg,#131922,#0F141B);flex-wrap:wrap;gap:10px;
+  }
+  .brand{display:flex;align-items:baseline;gap:10px;}
+  .brand-mark{font-family:var(--mono);font-size:13px;color:var(--amber);border:1px solid var(--amber-dim);border-radius:4px;padding:2px 7px;letter-spacing:.06em;}
+  .brand-name{font-family:var(--display);font-weight:700;font-size:20px;letter-spacing:-.01em;}
+  .top-right{display:flex;align-items:center;gap:16px;}
+  .streak-pill{
+    font-family:var(--mono);font-size:12.5px;color:var(--text);display:flex;align-items:center;gap:6px;
+    background:var(--surface);border:1px solid var(--border);border-radius:20px;padding:5px 12px;cursor:pointer;
+  }
+  .streak-pill:hover{border-color:var(--amber);}
+  .progress-pill{font-family:var(--mono);font-size:12.5px;color:var(--text-muted);display:flex;align-items:center;gap:8px;}
+  .progress-track{width:110px;height:5px;border-radius:3px;background:var(--surface-alt);overflow:hidden;}
+  .progress-fill{height:100%;background:linear-gradient(90deg,var(--amber),var(--teal));border-radius:3px;transition:width .4s ease;}
+
+  .layout{display:flex;flex:1;min-height:0;}
+  .sidebar{width:300px;flex-shrink:0;border-right:1px solid var(--border-soft);overflow-y:auto;padding:14px 12px 40px;background:#121821;}
+
+  .filter-label{font-family:var(--mono);font-size:10.5px;color:var(--text-faint);text-transform:uppercase;letter-spacing:.08em;margin:4px 2px 6px;}
+  .filter-row{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:16px;}
+  .filter-chip{font-family:var(--mono);font-size:11px;padding:5px 10px;border-radius:20px;border:1px solid var(--border);color:var(--text-muted);cursor:pointer;user-select:none;}
+  .filter-chip:hover{border-color:var(--text-muted);color:var(--text);}
+  .filter-chip.active{background:var(--surface-alt);border-color:var(--amber);color:var(--amber);}
+
+  .tier-group{margin-bottom:2px;}
+  .tier-head{display:flex;align-items:center;justify-content:space-between;padding:9px 8px;cursor:pointer;border-radius:6px;user-select:none;}
+  .tier-head:hover{background:var(--surface-alt);}
+  .tier-title{font-family:var(--display);font-weight:600;font-size:13px;letter-spacing:.01em;display:flex;align-items:center;gap:7px;}
+  .tier-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0;}
+  .tier-count{font-family:var(--mono);font-size:11px;color:var(--text-faint);}
+  .tier-caret{font-size:10px;color:var(--text-faint);transition:transform .2s ease;}
+  .tier-group.open .tier-caret{transform:rotate(90deg);}
+  .exercise-list{display:none;flex-direction:column;padding:2px 0 10px 6px;}
+  .tier-group.open .exercise-list{display:flex;}
+  .exercise-item{display:flex;align-items:center;gap:8px;padding:7px 8px;border-radius:6px;cursor:pointer;font-size:12.5px;color:var(--text-muted);border-left:2px solid transparent;}
+  .exercise-item:hover{background:var(--surface-alt);color:var(--text);}
+  .exercise-item.active{background:var(--surface-alt);color:var(--text);border-left-color:var(--amber);}
+  .ex-name{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .ds-tag{font-family:var(--mono);font-size:9px;color:var(--text-faint);border:1px solid var(--border);border-radius:3px;padding:1px 4px;flex-shrink:0;}
+  .check{width:14px;height:14px;border-radius:50%;border:1.5px solid var(--border);flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:8px;}
+  .exercise-item.done .check{background:var(--teal);border-color:var(--teal);color:#0b1a17;}
+
+  .main{flex:1;min-width:0;display:flex;flex-direction:column;overflow-y:auto;}
+  .main-inner{max-width:940px;width:100%;margin:0 auto;padding:26px 32px 60px;}
+
+  .welcome h1{font-family:var(--display);font-size:29px;margin:0 0 8px;letter-spacing:-.01em;}
+  .welcome p{color:var(--text-muted);line-height:1.6;max-width:640px;}
+  .daily-card{
+    margin:22px 0;padding:18px 20px;border-radius:10px;
+    background:linear-gradient(135deg,rgba(242,184,75,.08),rgba(95,203,187,.05));
+    border:1px solid var(--amber-dim);display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap;
+  }
+  .daily-card .dc-label{font-family:var(--mono);font-size:11px;color:var(--amber);text-transform:uppercase;letter-spacing:.08em;margin-bottom:4px;}
+  .daily-card .dc-title{font-family:var(--display);font-size:18px;font-weight:600;}
+  .daily-card .dc-btn{font-family:var(--mono);font-size:12.5px;background:var(--amber);color:#241a06;border:none;border-radius:6px;padding:9px 16px;cursor:pointer;font-weight:600;white-space:nowrap;}
+
+  .schema-svg{width:100%;margin:18px 0 6px;}
+  .schema-note{font-family:var(--mono);font-size:12px;color:var(--text-faint);margin-bottom:20px;}
+  .legend{display:flex;gap:16px;flex-wrap:wrap;font-family:var(--mono);font-size:11.5px;color:var(--text-muted);margin-bottom:8px;}
+  .legend span{display:flex;align-items:center;gap:6px;}
+  .legend .dot{width:8px;height:8px;border-radius:50%;}
+
+  /* Progress panel */
+  .progress-panel{background:var(--surface);border:1px solid var(--border-soft);border-radius:10px;padding:20px;margin-top:20px;}
+  .pp-stats{display:flex;gap:28px;flex-wrap:wrap;margin-bottom:18px;}
+  .pp-stat .num{font-family:var(--display);font-size:24px;font-weight:700;color:var(--amber);}
+  .pp-stat .lbl{font-family:var(--mono);font-size:10.5px;color:var(--text-faint);text-transform:uppercase;letter-spacing:.06em;}
+  .cal-grid{display:grid;grid-auto-flow:column;grid-template-rows:repeat(7,11px);gap:3px;overflow-x:auto;padding-bottom:6px;}
+  .cal-cell{width:11px;height:11px;border-radius:2px;background:var(--surface-alt);}
+  .cal-cell[data-lvl="1"]{background:#3a5a54;}
+  .cal-cell[data-lvl="2"]{background:#4d9187;}
+  .cal-cell[data-lvl="3"]{background:var(--teal);}
+  .cal-note{font-family:var(--mono);font-size:11px;color:var(--text-faint);margin-top:8px;}
+
+  .crumb{font-family:var(--mono);font-size:11.5px;color:var(--text-faint);text-transform:uppercase;letter-spacing:.08em;margin-bottom:6px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;}
+  .tier-badge{font-family:var(--mono);font-size:10.5px;text-transform:uppercase;letter-spacing:.06em;padding:2px 8px;border-radius:20px;border:1px solid;}
+  .ex-title{font-family:var(--display);font-size:23px;font-weight:600;margin:0 0 12px;letter-spacing:-.01em;}
+  .prompt{background:var(--surface);border:1px solid var(--border-soft);border-left:3px solid var(--amber);border-radius:8px;padding:16px 18px;line-height:1.6;font-size:14.5px;margin-bottom:18px;}
+
+  details.schema-ref{margin-bottom:20px;}
+  details.schema-ref summary{cursor:pointer;font-family:var(--mono);font-size:12.5px;color:var(--text-muted);padding:8px 0;user-select:none;}
+  details.schema-ref summary:hover{color:var(--text);}
+  .schema-tables{display:flex;gap:14px;flex-wrap:wrap;margin-top:8px;}
+  .schema-table{background:var(--surface);border:1px solid var(--border-soft);border-radius:8px;padding:10px 12px;min-width:150px;font-family:var(--mono);font-size:12px;}
+  .schema-table .tname{color:var(--amber);font-weight:600;margin-bottom:6px;}
+  .schema-table .col{color:var(--text-muted);}
+
+  .editor-wrap{border:1px solid var(--border);border-radius:10px;overflow:hidden;background:#0C1117;}
+  .editor-bar{display:flex;align-items:center;justify-content:space-between;padding:8px 12px;background:var(--surface);border-bottom:1px solid var(--border-soft);}
+  .editor-bar .dots{display:flex;gap:6px;}
+  .dots span{width:9px;height:9px;border-radius:50%;background:var(--border);}
+  .run-btn{font-family:var(--mono);font-size:12.5px;background:var(--amber);color:#241a06;border:none;border-radius:6px;padding:7px 14px;cursor:pointer;font-weight:600;display:flex;align-items:center;gap:6px;}
+  .run-btn:hover{filter:brightness(1.08);}
+  .run-btn:active{transform:translateY(1px);}
+  textarea#sql-input{width:100%;min-height:120px;background:transparent;color:var(--text);border:none;outline:none;resize:vertical;font-family:var(--mono);font-size:14px;line-height:1.55;padding:14px 16px;}
+  .hint-row{display:flex;gap:10px;margin-top:12px;}
+  .ghost-btn{font-family:var(--mono);font-size:12px;background:transparent;color:var(--text-muted);border:1px solid var(--border);border-radius:6px;padding:6px 12px;cursor:pointer;}
+  .ghost-btn:hover{border-color:var(--text-muted);color:var(--text);}
+  .reveal-box{margin-top:10px;padding:12px 14px;background:var(--surface);border:1px solid var(--border-soft);border-radius:8px;font-family:var(--mono);font-size:13px;color:var(--text-muted);display:none;}
+  .reveal-box.show{display:block;}
+  .reveal-box .explain{font-family:var(--body);color:var(--text-muted);margin-top:8px;padding-top:8px;border-top:1px solid var(--border-soft);line-height:1.5;}
+
+  .feedback{margin-top:16px;padding:12px 16px;border-radius:8px;font-size:13.5px;display:none;font-family:var(--body);align-items:center;gap:8px;}
+  .feedback.show{display:flex;}
+  .feedback.ok{background:rgba(95,203,187,.1);border:1px solid rgba(95,203,187,.35);color:var(--teal);}
+  .feedback.bad{background:rgba(242,104,92,.1);border:1px solid rgba(242,104,92,.35);color:var(--danger);}
+
+  .results-wrap{margin-top:18px;}
+  .results-label{font-family:var(--mono);font-size:11.5px;color:var(--text-faint);text-transform:uppercase;letter-spacing:.08em;margin-bottom:8px;}
+  .table-scroll{overflow:auto;border:1px solid var(--border-soft);border-radius:8px;max-height:320px;}
+  table.results{border-collapse:collapse;width:100%;font-family:var(--mono);font-size:12.5px;}
+  table.results th{position:sticky;top:0;background:var(--surface-alt);color:var(--amber);text-align:left;padding:8px 12px;border-bottom:1px solid var(--border);white-space:nowrap;}
+  table.results td{padding:7px 12px;border-bottom:1px solid var(--border-soft);color:var(--text-muted);white-space:nowrap;}
+  table.results tr:last-child td{border-bottom:none;}
+  .empty-note{color:var(--text-faint);font-family:var(--mono);font-size:12.5px;padding:14px;}
+
+  .nav-footer{display:flex;justify-content:space-between;margin-top:28px;padding-top:16px;border-top:1px solid var(--border-soft);}
+  .nav-btn{font-family:var(--mono);font-size:12.5px;background:var(--surface);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:9px 14px;cursor:pointer;}
+  .nav-btn:hover{border-color:var(--text-muted);}
+  .nav-btn:disabled{opacity:.35;cursor:default;}
+
+  ::-webkit-scrollbar{width:10px;height:10px;}
+  ::-webkit-scrollbar-thumb{background:var(--border);border-radius:5px;}
+  ::-webkit-scrollbar-track{background:transparent;}
+
+  @media (max-width:760px){
+    .layout{flex-direction:column;}
+    .sidebar{width:100%;max-height:280px;border-right:none;border-bottom:1px solid var(--border-soft);}
+    .main-inner{padding:20px 16px 50px;}
+  }
+</style>
+</head>
+<body>
+
+<div id="loading-overlay"><div class="spin"></div><p>Loading SQL engine…</p></div>
+
+<div class="topbar">
+  <div class="brand"><span class="brand-mark">SQL</span><span class="brand-name">QueryBench</span></div>
+  <div class="top-right">
+    <div class="streak-pill" id="streak-pill">🔥 0 day streak</div>
+    <div class="progress-pill"><span id="progress-text">0 / 30 solved</span><div class="progress-track"><div class="progress-fill" id="progress-fill" style="width:0%"></div></div></div>
+  </div>
+</div>
+
+<div class="layout">
+  <div class="sidebar" id="sidebar"></div>
+  <div class="main"><div class="main-inner" id="main-inner"></div></div>
+</div>
+
+<script>
+/* ============================================================
+   SCHEMA + SEED SQL (verified against real SQLite via sql.js)
+   ============================================================ */
+const SCHEMA_SQL = `
+CREATE TABLE customers (customer_id INTEGER, name TEXT, city TEXT, signup_date TEXT);
+CREATE TABLE products (product_id INTEGER, name TEXT, category TEXT, price REAL);
+CREATE TABLE orders (order_id INTEGER, customer_id INTEGER, order_date TEXT, status TEXT);
+CREATE TABLE order_items (order_item_id INTEGER, order_id INTEGER, product_id INTEGER, quantity INTEGER);
+CREATE TABLE departments (department_id INTEGER, department_name TEXT, location TEXT);
+CREATE TABLE employees (emp_id INTEGER, name TEXT, department_id INTEGER, salary INTEGER, hire_date TEXT, manager_id INTEGER);
+CREATE TABLE users (user_id INTEGER, name TEXT, signup_date TEXT, plan TEXT);
+CREATE TABLE events (event_id INTEGER, user_id INTEGER, event_type TEXT, event_date TEXT);
+`;
+
+const SEED_SQL = `
+INSERT INTO customers VALUES (1,'Maria Chen','Austin','2024-01-14');
+INSERT INTO customers VALUES (2,'James Ortiz','Seattle','2024-02-02');
+INSERT INTO customers VALUES (3,'Priya Nair','Austin','2024-02-20');
+INSERT INTO customers VALUES (4,'Devon Wallace','Chicago','2024-03-05');
+INSERT INTO customers VALUES (5,'Lena Kowalski','Denver','2024-03-18');
+INSERT INTO customers VALUES (6,'Sam Okafor','Seattle','2024-04-01');
+INSERT INTO customers VALUES (7,'Grace Lindqvist','Chicago','2024-04-22');
+INSERT INTO customers VALUES (8,'Marcus Webb','Denver','2024-05-10');
+INSERT INTO customers VALUES (9,'Ana Torres','Austin','2024-05-27');
+INSERT INTO customers VALUES (10,'Kenji Sato','Seattle','2024-06-09');
+INSERT INTO products VALUES (1,'Wireless Mouse','Electronics',24.99);
+INSERT INTO products VALUES (2,'Mechanical Keyboard','Electronics',89.00);
+INSERT INTO products VALUES (3,'USB-C Hub','Electronics',39.50);
+INSERT INTO products VALUES (4,'Desk Lamp','Home',32.00);
+INSERT INTO products VALUES (5,'Ceramic Mug Set','Home',18.75);
+INSERT INTO products VALUES (6,'Standing Desk Mat','Home',54.00);
+INSERT INTO products VALUES (7,'Running Shoes','Apparel',74.99);
+INSERT INTO products VALUES (8,'Rain Jacket','Apparel',120.00);
+INSERT INTO products VALUES (9,'SQL for Analysts','Books',29.99);
+INSERT INTO products VALUES (10,'Data Viz Handbook','Books',34.00);
+INSERT INTO orders VALUES (101,1,'2024-06-01','completed');
+INSERT INTO orders VALUES (102,1,'2024-07-15','completed');
+INSERT INTO orders VALUES (103,2,'2024-06-10','pending');
+INSERT INTO orders VALUES (104,3,'2024-06-18','completed');
+INSERT INTO orders VALUES (105,4,'2024-06-20','cancelled');
+INSERT INTO orders VALUES (106,4,'2024-07-02','completed');
+INSERT INTO orders VALUES (107,5,'2024-07-04','completed');
+INSERT INTO orders VALUES (108,6,'2024-07-11','pending');
+INSERT INTO orders VALUES (109,6,'2024-07-19','completed');
+INSERT INTO orders VALUES (110,7,'2024-07-22','completed');
+INSERT INTO orders VALUES (111,8,'2024-07-25','cancelled');
+INSERT INTO orders VALUES (112,3,'2024-08-01','completed');
+INSERT INTO orders VALUES (113,2,'2024-08-03','completed');
+INSERT INTO orders VALUES (114,5,'2024-08-05','pending');
+INSERT INTO order_items VALUES (1,101,1,2);
+INSERT INTO order_items VALUES (2,101,5,1);
+INSERT INTO order_items VALUES (3,102,2,1);
+INSERT INTO order_items VALUES (4,103,7,1);
+INSERT INTO order_items VALUES (5,103,3,2);
+INSERT INTO order_items VALUES (6,104,9,1);
+INSERT INTO order_items VALUES (7,104,10,1);
+INSERT INTO order_items VALUES (8,105,8,1);
+INSERT INTO order_items VALUES (9,106,4,2);
+INSERT INTO order_items VALUES (10,106,6,1);
+INSERT INTO order_items VALUES (11,107,1,1);
+INSERT INTO order_items VALUES (12,107,2,1);
+INSERT INTO order_items VALUES (13,108,5,3);
+INSERT INTO order_items VALUES (14,109,7,1);
+INSERT INTO order_items VALUES (15,109,8,1);
+INSERT INTO order_items VALUES (16,110,9,2);
+INSERT INTO order_items VALUES (17,111,3,1);
+INSERT INTO order_items VALUES (18,112,6,1);
+INSERT INTO order_items VALUES (19,112,4,1);
+INSERT INTO order_items VALUES (20,113,10,1);
+INSERT INTO order_items VALUES (21,113,1,3);
+INSERT INTO order_items VALUES (22,114,2,1);
+INSERT INTO departments VALUES (1,'Sales','Austin');
+INSERT INTO departments VALUES (2,'Engineering','Seattle');
+INSERT INTO departments VALUES (3,'Marketing','Chicago');
+INSERT INTO departments VALUES (4,'Finance','Denver');
+INSERT INTO employees VALUES (1,'Alice Kim',1,72000,'2022-01-10',NULL);
+INSERT INTO employees VALUES (2,'Bob Rivera',1,65000,'2022-03-15',1);
+INSERT INTO employees VALUES (3,'Carla Nguyen',1,68000,'2022-06-01',1);
+INSERT INTO employees VALUES (4,'Derek Shaw',1,61000,'2023-02-20',1);
+INSERT INTO employees VALUES (5,'Dan Foster',2,95000,'2021-11-05',NULL);
+INSERT INTO employees VALUES (6,'Eve Park',2,105000,'2022-04-18',5);
+INSERT INTO employees VALUES (7,'Frank Silva',2,88000,'2022-09-09',5);
+INSERT INTO employees VALUES (8,'Grace Liu',2,91000,'2023-05-30',5);
+INSERT INTO employees VALUES (9,'Hannah Cole',3,70000,'2022-02-14',NULL);
+INSERT INTO employees VALUES (10,'Ian Brooks',3,58000,'2023-01-11',9);
+INSERT INTO employees VALUES (11,'Jenna Ortiz',3,62000,'2023-07-22',9);
+INSERT INTO employees VALUES (12,'Kevin Ross',4,83000,'2022-08-08',NULL);
+INSERT INTO users VALUES (1,'Olivia Grant','2024-05-01','free');
+INSERT INTO users VALUES (2,'Noah Patel','2024-05-03','pro');
+INSERT INTO users VALUES (3,'Ava Coleman','2024-05-10','free');
+INSERT INTO users VALUES (4,'Liam Brooks','2024-05-12','pro');
+INSERT INTO users VALUES (5,'Sophia Reyes','2024-05-15','free');
+INSERT INTO users VALUES (6,'Mason Clarke','2024-05-20','free');
+INSERT INTO users VALUES (7,'Isabella Wu','2024-05-22','pro');
+INSERT INTO users VALUES (8,'Ethan Diaz','2024-05-28','free');
+INSERT INTO events VALUES (1,1,'login','2024-05-02');
+INSERT INTO events VALUES (2,1,'page_view','2024-05-02');
+INSERT INTO events VALUES (3,1,'purchase','2024-05-03');
+INSERT INTO events VALUES (4,1,'login','2024-05-10');
+INSERT INTO events VALUES (5,2,'login','2024-05-04');
+INSERT INTO events VALUES (6,2,'page_view','2024-05-04');
+INSERT INTO events VALUES (7,2,'page_view','2024-05-05');
+INSERT INTO events VALUES (8,2,'purchase','2024-05-06');
+INSERT INTO events VALUES (9,2,'login','2024-05-15');
+INSERT INTO events VALUES (10,3,'login','2024-05-11');
+INSERT INTO events VALUES (11,3,'page_view','2024-05-11');
+INSERT INTO events VALUES (12,4,'login','2024-05-13');
+INSERT INTO events VALUES (13,4,'purchase','2024-05-13');
+INSERT INTO events VALUES (14,4,'login','2024-05-20');
+INSERT INTO events VALUES (15,4,'page_view','2024-05-20');
+INSERT INTO events VALUES (16,4,'purchase','2024-05-21');
+INSERT INTO events VALUES (17,5,'login','2024-05-16');
+INSERT INTO events VALUES (18,6,'login','2024-05-21');
+INSERT INTO events VALUES (19,6,'page_view','2024-05-22');
+INSERT INTO events VALUES (20,6,'page_view','2024-05-23');
+INSERT INTO events VALUES (21,7,'login','2024-05-23');
+INSERT INTO events VALUES (22,7,'purchase','2024-05-24');
+INSERT INTO events VALUES (23,7,'login','2024-05-30');
+INSERT INTO events VALUES (24,8,'login','2024-05-29');
+`;
+
+const DATASETS = {
+  retail: { label:'Retail', tables:[
+    {name:'customers', cols:['customer_id','name','city','signup_date']},
+    {name:'products', cols:['product_id','name','category','price']},
+    {name:'orders', cols:['order_id','customer_id','order_date','status']},
+    {name:'order_items', cols:['order_item_id','order_id','product_id','quantity']}
+  ]},
+  hr: { label:'HR', tables:[
+    {name:'departments', cols:['department_id','department_name','location']},
+    {name:'employees', cols:['emp_id','name','department_id','salary','hire_date','manager_id']}
+  ]},
+  web: { label:'Web Analytics', tables:[
+    {name:'users', cols:['user_id','name','signup_date','plan']},
+    {name:'events', cols:['event_id','user_id','event_type','event_date']}
+  ]}
+};
+
+const TIERS = [
+  {id:'Fundamentals', color:'var(--teal)'},
+  {id:'Intermediate', color:'var(--amber)'},
+  {id:'Advanced', color:'var(--purple)'},
+  {id:'Interview Classics', color:'var(--danger)'}
+];
+
+/* ============================================================
+   30 EXERCISES — every ref query pre-verified against sql.js
+   ============================================================ */
+const EXERCISES = [
+  {id:'retail-1', dataset:'retail', tier:'Fundamentals', title:'Select specific columns',
+    prompt:"Select the name and city columns for every customer.",
+    hint:"List only the columns you need, separated by commas, right after SELECT.",
+    explain:"This is a projection — picking a subset of columns instead of using SELECT *. It's the first thing to reach for whenever you don't need every field.",
+    ref:"SELECT name, city FROM customers"},
+  {id:'retail-2', dataset:'retail', tier:'Fundamentals', title:'Filter with WHERE',
+    prompt:"Find all products priced over $50 (return all columns).",
+    hint:"WHERE price > 50",
+    explain:"WHERE filters rows before they're returned. It runs on the raw table, before any grouping happens.",
+    ref:"SELECT * FROM products WHERE price > 50"},
+  {id:'retail-3', dataset:'retail', tier:'Fundamentals', title:'Sort and limit',
+    prompt:"Return the 3 cheapest products: product_id, name, and price, cheapest first.",
+    hint:"Combine ORDER BY price ASC with LIMIT 3.",
+    explain:"ORDER BY sorts the full result set, and LIMIT then trims it. Order matters: SQL sorts first, then cuts.",
+    ref:"SELECT product_id, name, price FROM products ORDER BY price ASC LIMIT 3", orderMatters:true},
+  {id:'retail-4', dataset:'retail', tier:'Fundamentals', title:'Average with an alias',
+    prompt:"Find the average price of all products. Alias the result as avg_price.",
+    hint:"AVG() computes the mean of a numeric column.",
+    explain:"Aggregate functions like AVG collapse many rows into one. Without a GROUP BY, the whole table is treated as a single group.",
+    ref:"SELECT AVG(price) AS avg_price FROM products"},
+  {id:'retail-5', dataset:'retail', tier:'Intermediate', title:'Group and count',
+    prompt:"For each category, count how many products exist. Return category and product_count.",
+    hint:"GROUP BY category, then COUNT(*) per group.",
+    explain:"GROUP BY splits the table into buckets, one per distinct value, and the aggregate function runs separately within each bucket.",
+    ref:"SELECT category, COUNT(*) AS product_count FROM products GROUP BY category"},
+  {id:'retail-6', dataset:'retail', tier:'Intermediate', title:'Filter groups with HAVING',
+    prompt:"Find categories that have more than 2 products. Return category and product_count.",
+    hint:"HAVING filters groups after aggregation — use it instead of WHERE for COUNT(*) > 2.",
+    explain:"WHERE can't reference an aggregate because it runs before grouping. HAVING runs after GROUP BY, so it can filter on COUNT, SUM, AVG, etc.",
+    ref:"SELECT category, COUNT(*) AS product_count FROM products GROUP BY category HAVING COUNT(*) > 2"},
+  {id:'retail-7', dataset:'retail', tier:'Intermediate', title:'Inner join two tables',
+    prompt:"List each order's order_id alongside the name of the customer who placed it.",
+    hint:"JOIN orders to customers ON orders.customer_id = customers.customer_id.",
+    explain:"INNER JOIN keeps only rows that have a match on both sides. An order with no matching customer (or vice versa) would be dropped entirely.",
+    ref:"SELECT orders.order_id, customers.name FROM orders INNER JOIN customers ON orders.customer_id = customers.customer_id"},
+  {id:'retail-8', dataset:'retail', tier:'Intermediate', title:'Keep unmatched rows with LEFT JOIN',
+    prompt:"List every customer's name along with any order_id they have. Customers with no orders should still appear, with order_id showing as NULL.",
+    hint:"A LEFT JOIN keeps all rows from the left (first) table even when there's no match on the right.",
+    explain:"LEFT JOIN is the go-to when you need 'everyone, plus their activity if any' — think churn analysis, or finding customers who never bought anything.",
+    ref:"SELECT customers.name, orders.order_id FROM customers LEFT JOIN orders ON customers.customer_id = orders.customer_id"},
+
+  {id:'hr-1', dataset:'hr', tier:'Intermediate', title:'Self-join for manager names',
+    prompt:"List each employee's name alongside their manager's name. Employees with no manager should show manager as NULL.",
+    hint:"Join the employees table to itself: one copy for the employee, one for the manager.",
+    explain:"A self-join treats one table as two roles at once. Here, e.manager_id points to another row's m.emp_id in the very same table.",
+    ref:"SELECT e.name AS employee, m.name AS manager FROM employees e LEFT JOIN employees m ON e.manager_id = m.emp_id"},
+  {id:'hr-2', dataset:'hr', tier:'Intermediate', title:'Join across departments',
+    prompt:"List each employee's name, their department_name, and their salary.",
+    hint:"Join employees to departments on department_id.",
+    explain:"This is a straightforward lookup join — pulling a human-readable label (department_name) in from a related table using a foreign key.",
+    ref:"SELECT employees.name, departments.department_name, employees.salary FROM employees INNER JOIN departments ON employees.department_id = departments.department_id"},
+  {id:'hr-3', dataset:'hr', tier:'Intermediate', title:'Average salary per department',
+    prompt:"Find the average salary for each department. Return department_id and avg_salary.",
+    hint:"GROUP BY department_id, then AVG(salary).",
+    explain:"Same pattern as grouping products by category — group by the dimension, aggregate the measure.",
+    ref:"SELECT department_id, AVG(salary) AS avg_salary FROM employees GROUP BY department_id"},
+  {id:'hr-4', dataset:'hr', tier:'Advanced', title:'Filter with a subquery',
+    prompt:"Find employees earning more than the company-wide average salary (return all columns).",
+    hint:"Put a SELECT AVG(salary)... query inside the WHERE clause.",
+    explain:"A scalar subquery — one that returns a single value — can be used anywhere a literal number could go, including inside a comparison.",
+    ref:"SELECT * FROM employees WHERE salary > (SELECT AVG(salary) FROM employees)"},
+  {id:'hr-5', dataset:'hr', tier:'Advanced', title:'Correlated subquery',
+    prompt:"Find employees earning more than their own department's average salary. Return name, department_id, and salary.",
+    hint:"The subquery needs to reference the outer employee's department_id, so it re-runs once per row.",
+    explain:"Unlike the previous exercise, this subquery depends on the outer row (e.department_id), so it's evaluated once per employee rather than once total. That's what makes it 'correlated.'",
+    ref:"SELECT e.name, e.department_id, e.salary FROM employees e WHERE e.salary > (SELECT AVG(e2.salary) FROM employees e2 WHERE e2.department_id = e.department_id)"},
+  {id:'hr-6', dataset:'hr', tier:'Advanced', title:'CTE for department averages',
+    prompt:"Using a CTE (WITH clause) that computes each department's average salary, return the department_id and avg_salary for departments averaging above $70,000.",
+    hint:"WITH dept_avg AS (SELECT department_id, AVG(salary) AS avg_salary FROM employees GROUP BY department_id) SELECT ... WHERE avg_salary > 70000",
+    explain:"A CTE names a subquery so you can reference it like a table. It's often clearer than nesting subqueries, especially once you start chaining several steps.",
+    ref:"WITH dept_avg AS (SELECT department_id, AVG(salary) AS avg_salary FROM employees GROUP BY department_id) SELECT department_id, avg_salary FROM dept_avg WHERE avg_salary > 70000"},
+  {id:'hr-7', dataset:'hr', tier:'Interview Classics', title:'Rank within department',
+    prompt:"Rank employees by salary within their own department, highest first. Return name, department_id, salary, and the rank as dept_rank.",
+    hint:"ROW_NUMBER() OVER (PARTITION BY department_id ORDER BY salary DESC)",
+    explain:"PARTITION BY resets the ranking for each department — it's like doing a separate ORDER BY inside each group, without collapsing the rows the way GROUP BY would.",
+    ref:"SELECT name, department_id, salary, ROW_NUMBER() OVER (PARTITION BY department_id ORDER BY salary DESC) AS dept_rank FROM employees"},
+  {id:'hr-8', dataset:'hr', tier:'Interview Classics', title:'The classic: Nth highest salary',
+    prompt:"Find the employee(s) with the second-highest salary in the company, using RANK(). Return name and salary.",
+    hint:"Rank everyone by salary first (as a subquery), then filter WHERE rnk = 2 in the outer query.",
+    explain:"This is one of the most common SQL interview questions. RANK() (unlike ROW_NUMBER) gives tied values the same rank and skips the next number, which matters if two people share a salary.",
+    ref:"SELECT name, salary FROM (SELECT name, salary, RANK() OVER (ORDER BY salary DESC) AS rnk FROM employees) WHERE rnk = 2"},
+  {id:'hr-9', dataset:'hr', tier:'Interview Classics', title:'DENSE_RANK and ties',
+    prompt:"Rank all employees by salary company-wide using DENSE_RANK, highest first. Return name, salary, and the rank as salary_rank.",
+    hint:"DENSE_RANK() OVER (ORDER BY salary DESC)",
+    explain:"DENSE_RANK is like RANK but doesn't leave gaps after ties — two people tied for 1st means the next rank is 2, not 3. Know the difference; interviewers love asking about it.",
+    ref:"SELECT name, salary, DENSE_RANK() OVER (ORDER BY salary DESC) AS salary_rank FROM employees"},
+  {id:'hr-10', dataset:'hr', tier:'Interview Classics', title:'LAG to compare to the previous row',
+    prompt:"Ordering employees by hire_date, show each employee's hire_date alongside the previous employee's hire_date, aliased as prev_hire_date.",
+    hint:"LAG(hire_date) OVER (ORDER BY hire_date)",
+    explain:"LAG reaches back to a prior row in the current ordering without a self-join. It's the standard way to compute things like 'time since the last event' or 'change from the previous period.'",
+    ref:"SELECT name, hire_date, LAG(hire_date) OVER (ORDER BY hire_date) AS prev_hire_date FROM employees"},
+  {id:'hr-11', dataset:'hr', tier:'Interview Classics', title:'Running total',
+    prompt:"Ordering employees by hire_date, show a running total of salary as people were hired. Return name, hire_date, salary, and running_total.",
+    hint:"SUM(salary) OVER (ORDER BY hire_date ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)",
+    explain:"This is a cumulative window frame: instead of summing the whole table, each row sums everything from the start up through itself. This is exactly how running totals and cumulative revenue charts are built.",
+    ref:"SELECT name, hire_date, salary, SUM(salary) OVER (ORDER BY hire_date ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS running_total FROM employees"},
+  {id:'hr-12', dataset:'hr', tier:'Interview Classics', title:'Top earner per department',
+    prompt:"Find only the highest-paid employee in each department. Return name, department_id, and salary.",
+    hint:"Use ROW_NUMBER partitioned by department ordered by salary, then filter to rn = 1 in an outer query.",
+    explain:"This 'window, then filter in an outer query' pattern is one of the most useful tricks in SQL — window functions can't be filtered directly in WHERE, so you wrap them in a subquery first.",
+    ref:"SELECT name, department_id, salary FROM (SELECT name, department_id, salary, ROW_NUMBER() OVER (PARTITION BY department_id ORDER BY salary DESC) AS rn FROM employees) WHERE rn = 1"},
+
+  {id:'web-1', dataset:'web', tier:'Intermediate', title:'Count events per user',
+    prompt:"Count how many events each user has. Return user_id and event_count.",
+    hint:"GROUP BY user_id, COUNT(*).",
+    explain:"The same group-and-count pattern shows up everywhere in analytics: sessions per user, orders per customer, tickets per agent.",
+    ref:"SELECT user_id, COUNT(*) AS event_count FROM events GROUP BY user_id"},
+  {id:'web-2', dataset:'web', tier:'Intermediate', title:'Filter by event type',
+    prompt:"Find all purchase events (return all columns from events).",
+    hint:"WHERE event_type = 'purchase'",
+    explain:"A plain equality filter on a categorical column — the bread and butter of event-log analysis.",
+    ref:"SELECT * FROM events WHERE event_type = 'purchase'"},
+  {id:'web-3', dataset:'web', tier:'Intermediate', title:'Join users to their events',
+    prompt:"List each user's name alongside every event_type and event_date they have.",
+    hint:"Join users to events on user_id.",
+    explain:"Users without any events would be dropped by this INNER JOIN — that's the difference from the LEFT JOIN version a few exercises later.",
+    ref:"SELECT users.name, events.event_type, events.event_date FROM users INNER JOIN events ON users.user_id = events.user_id"},
+  {id:'web-4', dataset:'web', tier:'Advanced', title:'Users who purchased, via subquery',
+    prompt:"Find the name and plan of every user who has made at least one purchase.",
+    hint:"WHERE user_id IN (SELECT user_id FROM events WHERE event_type = 'purchase')",
+    explain:"IN with a subquery is a clean way to filter one table based on membership in another, without needing to JOIN and then de-duplicate.",
+    ref:"SELECT name, plan FROM users WHERE user_id IN (SELECT user_id FROM events WHERE event_type = 'purchase')"},
+  {id:'web-5', dataset:'web', tier:'Advanced', title:'CTE plus join',
+    prompt:"Using a CTE that counts events per user, return the name and event_count for users with more than 3 events.",
+    hint:"Build the counts in a WITH clause, then join it back to users and filter.",
+    explain:"Chaining a CTE into a join is a very common real-world pattern: pre-aggregate, then bring in descriptive fields you couldn't group by directly.",
+    ref:"WITH counts AS (SELECT user_id, COUNT(*) AS event_count FROM events GROUP BY user_id) SELECT users.name, counts.event_count FROM users INNER JOIN counts ON users.user_id = counts.user_id WHERE counts.event_count > 3"},
+  {id:'web-6', dataset:'web', tier:'Advanced', title:'LEFT JOIN with aggregation',
+    prompt:"List every user's name with their total event count, including users with zero events (they should show 0, not be missing).",
+    hint:"LEFT JOIN users to events, GROUP BY user, and COUNT the event_id column (not COUNT(*)).",
+    explain:"COUNT(*) would count 1 even for a NULL-filled unmatched row. COUNT(events.event_id) only counts actual matched events, correctly giving 0 for users with none.",
+    ref:"SELECT users.name, COUNT(events.event_id) AS event_count FROM users LEFT JOIN events ON users.user_id = events.user_id GROUP BY users.user_id, users.name"},
+  {id:'web-7', dataset:'web', tier:'Interview Classics', title:'Number events per user chronologically',
+    prompt:"For each user, number their events in chronological order (earliest first) as event_seq. Return user_id, event_date, event_type, event_seq.",
+    hint:"ROW_NUMBER() OVER (PARTITION BY user_id ORDER BY event_date)",
+    explain:"This is the foundation of funnel and sessionization analysis — knowing which event was a user's 1st, 2nd, 3rd, and so on.",
+    ref:"SELECT user_id, event_date, event_type, ROW_NUMBER() OVER (PARTITION BY user_id ORDER BY event_date) AS event_seq FROM events"},
+  {id:'web-8', dataset:'web', tier:'Interview Classics', title:"Each user's first event",
+    prompt:"Find only each user's very first event. Return user_id, event_date, event_type.",
+    hint:"Use ROW_NUMBER partitioned by user ordered by event_date, then filter to rn = 1.",
+    explain:"A direct application of the previous exercise — this exact pattern answers 'what's the first touchpoint per user,' a question that comes up constantly in onboarding and acquisition analysis.",
+    ref:"SELECT user_id, event_date, event_type FROM (SELECT user_id, event_date, event_type, ROW_NUMBER() OVER (PARTITION BY user_id ORDER BY event_date) AS rn FROM events) WHERE rn = 1"},
+  {id:'web-9', dataset:'web', tier:'Interview Classics', title:'Rank users by activity',
+    prompt:"Rank users by their total event count, most active first. Return user_id, event_count, and activity_rank.",
+    hint:"First aggregate counts per user in a subquery, then RANK() OVER (ORDER BY event_count DESC) on top of that.",
+    explain:"Window functions can sit on top of an already-aggregated subquery — this two-step 'aggregate, then rank' shape is extremely common in leaderboard-style reporting.",
+    ref:"SELECT user_id, event_count, RANK() OVER (ORDER BY event_count DESC) AS activity_rank FROM (SELECT user_id, COUNT(*) AS event_count FROM events GROUP BY user_id)"},
+  {id:'web-10', dataset:'web', tier:'Interview Classics', title:"Previous event type with LAG",
+    prompt:"For each user's events ordered by date, show the previous event's type alongside the current one, aliased as prev_event_type.",
+    hint:"LAG(event_type) OVER (PARTITION BY user_id ORDER BY event_date)",
+    explain:"This is the core of step-by-step funnel analysis: 'what did people do right before a purchase?' is answered by comparing each row to its LAG.",
+    ref:"SELECT user_id, event_date, event_type, LAG(event_type) OVER (PARTITION BY user_id ORDER BY event_date) AS prev_event_type FROM events"}
+];
+
+/* ============================================================
+   STATE
+   ============================================================ */
+let db = null;
+let currentId = null;
+let completed = new Set();
+let solvedAt = {};           // { exerciseId: 'YYYY-MM-DDTHH:MM:SS' }
+let datasetFilter = 'All';
+let openTiers = new Set(['Fundamentals']);
+let dailyExercise = null;
+
+const STORAGE_KEY = 'sql-practice-progress-v2';
+
+function hasClaudeStorage(){ return typeof window !== 'undefined' && window.storage && typeof window.storage.get === 'function'; }
+function hasLocalStorage(){
+  try{ const t='__qb_test__'; window.localStorage.setItem(t,'1'); window.localStorage.removeItem(t); return true; }catch(e){ return false; }
+}
+
+async function loadProgress(){
+  try{
+    let raw = null;
+    if(hasClaudeStorage()){
+      const res = await window.storage.get(STORAGE_KEY, false);
+      if(res && res.value) raw = res.value;
+    }else if(hasLocalStorage()){
+      raw = window.localStorage.getItem(STORAGE_KEY);
+    }
+    if(raw){
+      const data = JSON.parse(raw);
+      completed = new Set(data.completed || []);
+      solvedAt = data.solvedAt || {};
+    }
+  }catch(e){ /* fresh start */ }
+}
+async function saveProgress(){
+  const payload = JSON.stringify({ completed:[...completed], solvedAt });
+  try{
+    if(hasClaudeStorage()){
+      await window.storage.set(STORAGE_KEY, payload, false);
+    }else if(hasLocalStorage()){
+      window.localStorage.setItem(STORAGE_KEY, payload);
+    }
+  }catch(e){ console.error('progress save failed', e); }
+}
+
+function todayStr(){
+  const d = new Date();
+  return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+}
+function dateSeed(str){
+  let h = 0;
+  for(let i=0;i<str.length;i++){ h = (h*31 + str.charCodeAt(i)) | 0; }
+  return Math.abs(h);
+}
+function pickDailyExercise(){
+  const idx = dateSeed(todayStr()) % EXERCISES.length;
+  return EXERCISES[idx];
+}
+function practiceDaysFromSolvedAt(){
+  const days = new Set();
+  Object.values(solvedAt).forEach(ts => days.add(ts.slice(0,10)));
+  return days;
+}
+function computeStreak(){
+  const days = practiceDaysFromSolvedAt();
+  const today = todayStr();
+  let cursor = new Date();
+  // if nothing solved today, streak can still count up through yesterday
+  if(!days.has(today)) cursor.setDate(cursor.getDate()-1);
+  let streak = 0;
+  while(true){
+    const ds = cursor.getFullYear()+'-'+String(cursor.getMonth()+1).padStart(2,'0')+'-'+String(cursor.getDate()).padStart(2,'0');
+    if(days.has(ds)){ streak++; cursor.setDate(cursor.getDate()-1); }
+    else break;
+  }
+  return streak;
+}
+
+/* ============================================================
+   RENDER: SIDEBAR
+   ============================================================ */
+function renderSidebar(){
+  const sb = document.getElementById('sidebar');
+  sb.innerHTML = '';
+
+  const dsLabel = document.createElement('div');
+  dsLabel.className = 'filter-label';
+  dsLabel.textContent = 'Dataset';
+  sb.appendChild(dsLabel);
+
+  const filterRow = document.createElement('div');
+  filterRow.className = 'filter-row';
+  ['All', ...Object.keys(DATASETS)].forEach(key=>{
+    const label = key==='All' ? 'All' : DATASETS[key].label;
+    const chip = document.createElement('div');
+    chip.className = 'filter-chip' + (datasetFilter===key ? ' active' : '');
+    chip.textContent = label;
+    chip.onclick = ()=>{ datasetFilter = key; renderSidebar(); };
+    filterRow.appendChild(chip);
+  });
+  sb.appendChild(filterRow);
+
+  TIERS.forEach(tier=>{
+    const inTier = EXERCISES.filter(e=>e.tier===tier.id && (datasetFilter==='All' || e.dataset===datasetFilter));
+    if(inTier.length===0) return;
+    const doneCount = inTier.filter(e=>completed.has(e.id)).length;
+
+    const group = document.createElement('div');
+    group.className = 'tier-group' + (openTiers.has(tier.id) ? ' open' : '');
+
+    const head = document.createElement('div');
+    head.className = 'tier-head';
+    head.innerHTML = `
+      <span class="tier-title"><span class="tier-dot" style="background:${tier.color}"></span>${tier.id}</span>
+      <span style="display:flex;align-items:center;gap:8px;">
+        <span class="tier-count">${doneCount}/${inTier.length}</span>
+        <span class="tier-caret">▶</span>
+      </span>`;
+    head.onclick = ()=>{ openTiers.has(tier.id) ? openTiers.delete(tier.id) : openTiers.add(tier.id); renderSidebar(); };
+    group.appendChild(head);
+
+    const list = document.createElement('div');
+    list.className = 'exercise-list';
+    inTier.forEach(ex=>{
+      const item = document.createElement('div');
+      item.className = 'exercise-item' + (ex.id===currentId ? ' active' : '') + (completed.has(ex.id) ? ' done' : '');
+      item.innerHTML = `<span class="check">${completed.has(ex.id)?'✓':''}</span><span class="ex-name">${ex.title}</span><span class="ds-tag">${DATASETS[ex.dataset].label}</span>`;
+      item.onclick = ()=> selectExercise(ex.id);
+      list.appendChild(item);
+    });
+    group.appendChild(list);
+    sb.appendChild(group);
+  });
+}
+
+function updateHeader(){
+  const total = EXERCISES.length;
+  const done = completed.size;
+  document.getElementById('progress-text').textContent = `${done} / ${total} solved`;
+  document.getElementById('progress-fill').style.width = (total? (done/total*100):0) + '%';
+  const streak = computeStreak();
+  document.getElementById('streak-pill').textContent = `🔥 ${streak} day streak`;
+}
+
+/* ============================================================
+   RENDER: MAIN
+   ============================================================ */
+function renderWelcome(){
+  currentId = null;
+  renderSidebar();
+  const main = document.getElementById('main-inner');
+  const ex = dailyExercise;
+  main.innerHTML = `
+    <div class="welcome">
+      <h1>Practice SQL against a real database</h1>
+      <p>Three datasets — retail orders, company HR data, and product events — run right here in your browser on a real SQLite engine. Work from fundamentals up through interview-classic window functions, with instant automatic feedback.</p>
+
+      <div class="daily-card">
+        <div>
+          <div class="dc-label">Today's Challenge · ${ex.tier}</div>
+          <div class="dc-title">${ex.title}</div>
+        </div>
+        <button class="dc-btn" id="daily-btn">Start →</button>
+      </div>
+
+      ${schemaSVG()}
+      <div class="schema-note">retail: customers ─ orders ─ order_items ─ products&nbsp;&nbsp;·&nbsp;&nbsp;hr: departments ─ employees (self-referencing)&nbsp;&nbsp;·&nbsp;&nbsp;web: users ─ events</div>
+      <div class="legend">
+        ${TIERS.map(t=>`<span><span class="dot" style="background:${t.color}"></span>${t.id}</span>`).join('')}
+      </div>
+
+      <div class="progress-panel">
+        <div class="pp-stats">
+          <div class="pp-stat"><div class="num">${completed.size}/${EXERCISES.length}</div><div class="lbl">Exercises solved</div></div>
+          <div class="pp-stat"><div class="num">${computeStreak()}</div><div class="lbl">Current streak</div></div>
+          <div class="pp-stat"><div class="num">${practiceDaysFromSolvedAt().size}</div><div class="lbl">Days practiced</div></div>
+        </div>
+        ${calendarHTML()}
+      </div>
+    </div>
+  `;
+  document.getElementById('daily-btn').onclick = ()=> selectExercise(ex.id);
+}
+
+function calendarHTML(){
+  const days = practiceDaysFromSolvedAt();
+  const countsByDay = {};
+  Object.values(solvedAt).forEach(ts=>{
+    const d = ts.slice(0,10);
+    countsByDay[d] = (countsByDay[d]||0)+1;
+  });
+  const cells = [];
+  const today = new Date();
+  for(let i=69;i>=0;i--){
+    const d = new Date(today);
+    d.setDate(d.getDate()-i);
+    const ds = d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+    const c = countsByDay[ds] || 0;
+    const lvl = c===0 ? 0 : c===1 ? 1 : c<=3 ? 2 : 3;
+    cells.push(`<div class="cal-cell" data-lvl="${lvl}" title="${ds}: ${c} solved"></div>`);
+  }
+  return `<div class="cal-grid">${cells.join('')}</div><div class="cal-note">Last 70 days · darker = more solved that day</div>`;
+}
+
+function schemaSVG(){
+  return `
+  <svg class="schema-svg" viewBox="0 0 860 250" xmlns="http://www.w3.org/2000/svg">
+    <defs><marker id="arrow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#3A4756"/></marker></defs>
+    ${tableBox(10,20,'customers',['customer_id','name','city'])}
+    ${tableBox(210,20,'orders',['order_id','customer_id','status'])}
+    ${tableBox(410,20,'order_items',['order_item_id','order_id','product_id'])}
+    ${tableBox(610,20,'products',['product_id','name','price'])}
+    <line x1="190" y1="45" x2="210" y2="45" stroke="#3A4756" stroke-width="1.5" marker-end="url(#arrow)"/>
+    <line x1="390" y1="45" x2="410" y2="45" stroke="#3A4756" stroke-width="1.5" marker-end="url(#arrow)"/>
+    <line x1="590" y1="45" x2="610" y2="45" stroke="#3A4756" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+    ${tableBox(10,120,'departments',['department_id','department_name'])}
+    ${tableBox(210,120,'employees',['emp_id','name','department_id','manager_id'])}
+    <line x1="190" y1="145" x2="210" y2="145" stroke="#3A4756" stroke-width="1.5" marker-end="url(#arrow)"/>
+    <path d="M 210 175 C 190 190, 190 200, 210 205" fill="none" stroke="#3A4756" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+    ${tableBox(470,120,'users',['user_id','name','plan'])}
+    ${tableBox(670,120,'events',['event_id','user_id','event_type','event_date'])}
+    <line x1="650" y1="145" x2="670" y2="145" stroke="#3A4756" stroke-width="1.5" marker-end="url(#arrow)"/>
+  </svg>`;
+}
+function tableBox(x,y,name,cols){
+  const h = 24 + cols.length*16;
+  const rows = cols.map((c,i)=>`<text x="${x+10}" y="${y+42+i*16}" font-family="IBM Plex Mono" font-size="10.5" fill="#8B97A6">${c}</text>`).join('');
+  return `<rect x="${x}" y="${y}" width="180" height="${h}" rx="7" fill="#161D26" stroke="#2A3542"/><rect x="${x}" y="${y}" width="180" height="24" rx="7" fill="#1E2733"/><text x="${x+10}" y="${y+16}" font-family="Space Grotesk" font-weight="600" font-size="12.5" fill="#F2B84B">${name}</text>${rows}`;
+}
+
+function schemaRefHTML(datasetKey){
+  const ds = DATASETS[datasetKey];
+  return `<details class="schema-ref"><summary>▸ Show table reference (${ds.label})</summary>
+    <div class="schema-tables">
+      ${ds.tables.map(t=>`<div class="schema-table"><div class="tname">${t.name}</div>${t.cols.map(c=>`<div class="col">${c}</div>`).join('')}</div>`).join('')}
+    </div>
+  </details>`;
+}
+
+function tierColor(tierId){ return (TIERS.find(t=>t.id===tierId)||{}).color || 'var(--text-muted)'; }
+
+function selectExercise(id){
+  currentId = id;
+  const ex = EXERCISES.find(e=>e.id===id);
+  renderSidebar();
+  const main = document.getElementById('main-inner');
+  const idx = EXERCISES.findIndex(e=>e.id===id);
+  const prev = EXERCISES[idx-1];
+  const next = EXERCISES[idx+1];
+
+  main.innerHTML = `
+    <div class="crumb">
+      <span>${DATASETS[ex.dataset].label} · Exercise ${idx+1} / ${EXERCISES.length}</span>
+      <span class="tier-badge" style="color:${tierColor(ex.tier)};border-color:${tierColor(ex.tier)}">${ex.tier}</span>
+    </div>
+    <h2 class="ex-title">${ex.title}</h2>
+    <div class="prompt">${ex.prompt}</div>
+    ${schemaRefHTML(ex.dataset)}
+    <div class="editor-wrap">
+      <div class="editor-bar">
+        <div class="dots"><span></span><span></span><span></span></div>
+        <button class="run-btn" id="run-btn">▶ Run query <span style="opacity:.6;font-weight:400;">(⌘/Ctrl + Enter)</span></button>
+      </div>
+      <textarea id="sql-input" spellcheck="false" placeholder="SELECT * FROM ...;"></textarea>
+    </div>
+    <div class="hint-row">
+      <button class="ghost-btn" id="hint-btn">Show hint</button>
+      <button class="ghost-btn" id="sol-btn">Show solution</button>
+    </div>
+    <div class="reveal-box" id="hint-box"></div>
+    <div class="reveal-box" id="sol-box"></div>
+    <div class="feedback" id="feedback"></div>
+    <div class="results-wrap">
+      <div class="results-label">Result</div>
+      <div class="table-scroll" id="results"><div class="empty-note">Run a query to see results here.</div></div>
+    </div>
+    <div class="nav-footer">
+      <button class="nav-btn" id="prev-btn" ${prev?'':'disabled'}>← ${prev? prev.title : 'Start'}</button>
+      <button class="nav-btn" id="next-btn" ${next?'':'disabled'}>${next? next.title : 'Last exercise'} →</button>
+    </div>
+  `;
+
+  document.getElementById('run-btn').onclick = ()=> runCurrentQuery(ex);
+  document.getElementById('hint-btn').onclick = ()=>{
+    const box = document.getElementById('hint-box');
+    box.textContent = ex.hint;
+    box.classList.toggle('show');
+  };
+  document.getElementById('sol-btn').onclick = ()=>{
+    const box = document.getElementById('sol-box');
+    box.innerHTML = escapeHtml(ex.ref + ';') + `<div class="explain">${ex.explain}</div>`;
+    box.classList.toggle('show');
+  };
+  const ta = document.getElementById('sql-input');
+  ta.addEventListener('keydown', (e)=>{
+    if((e.metaKey||e.ctrlKey) && e.key==='Enter'){ e.preventDefault(); runCurrentQuery(ex); }
+  });
+  if(prev) document.getElementById('prev-btn').onclick = ()=> selectExercise(prev.id);
+  if(next) document.getElementById('next-btn').onclick = ()=> selectExercise(next.id);
+}
+
+function escapeHtml(s){
+  const d = document.createElement('div');
+  d.textContent = s;
+  return d.innerHTML;
+}
+
+function normalizeRows(cols, values){
+  return values.map(row => row.map(v=> v===null||v===undefined ? 'NULL' : String(v).trim()).sort().join('␟'));
+}
+
+function execToObjects(res){
+  if(!res || res.length===0) return {cols:[], rows:[]};
+  return { cols: res[0].columns, rows: res[0].values };
+}
+
+function runCurrentQuery(ex){
+  const ta = document.getElementById('sql-input');
+  const feedback = document.getElementById('feedback');
+  const resultsDiv = document.getElementById('results');
+  const query = ta.value.trim();
+  if(!query || !db) return;
+
+  let userRes;
+  try{
+    userRes = db.exec(query);
+  }catch(err){
+    feedback.className = 'feedback show bad';
+    feedback.innerHTML = `✕ Query error: ${escapeHtml(err.message || String(err))}`;
+    resultsDiv.innerHTML = `<div class="empty-note">No results — fix the error above and run again.</div>`;
+    return;
+  }
+
+  const { cols:userCols, rows:userRows } = execToObjects(userRes);
+  renderResultsTable(userCols, userRows, resultsDiv);
+
+  let refRes;
+  try{ refRes = db.exec(ex.ref); }catch(err){ refRes = []; }
+  const { rows:refRows } = execToObjects(refRes);
+
+  let isCorrect;
+  if(ex.orderMatters){
+    const a = normalizeRows(userCols, userRows);
+    const b = normalizeRows([], refRows);
+    isCorrect = a.length===b.length && a.every((v,i)=>v===b[i]);
+  }else{
+    const a = normalizeRows(userCols, userRows).sort();
+    const b = normalizeRows([], refRows).sort();
+    isCorrect = a.length===b.length && a.every((v,i)=>v===b[i]);
+  }
+
+  if(isCorrect && userRows.length>0){
+    feedback.className = 'feedback show ok';
+    feedback.innerHTML = `✓ Correct — that matches the expected result (${userRows.length} row${userRows.length===1?'':'s'}).`;
+    if(!completed.has(ex.id)){
+      completed.add(ex.id);
+      solvedAt[ex.id] = new Date().toISOString();
+      saveProgress();
+      updateHeader();
+      renderSidebar();
+    }
+  }else{
+    feedback.className = 'feedback show bad';
+    feedback.innerHTML = `✕ Not quite — your result doesn't match yet. Check the hint if you're stuck.`;
+  }
+}
+
+function renderResultsTable(cols, rows, container){
+  if(!rows || rows.length===0){
+    container.innerHTML = `<div class="empty-note">Query ran successfully — 0 rows returned.</div>`;
+    return;
+  }
+  let html = '<table class="results"><thead><tr>' + cols.map(c=>`<th>${escapeHtml(c)}</th>`).join('') + '</tr></thead><tbody>';
+  rows.slice(0,200).forEach(r=>{
+    html += '<tr>' + r.map(v=> `<td>${v===null||v===undefined?'∅':escapeHtml(String(v))}</td>`).join('') + '</tr>';
+  });
+  html += '</tbody></table>';
+  container.innerHTML = html;
+}
+
+/* ============================================================
+   INIT
+   ============================================================ */
+async function init(){
+  await loadProgress();
+  dailyExercise = pickDailyExercise();
+
+  const SQL = await initSqlJs({ locateFile: file => `https://cdn.jsdelivr.net/npm/sql.js@1.10.3/dist/${file}` });
+  db = new SQL.Database();
+  db.run(SCHEMA_SQL);
+  db.run(SEED_SQL);
+
+  document.getElementById('loading-overlay').style.display = 'none';
+  updateHeader();
+  renderWelcome();
+}
+init();
+</script>
+</body>
+</html>
